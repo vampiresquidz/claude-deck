@@ -1,0 +1,38 @@
+'use strict';
+const { contextBridge, ipcRenderer, webUtils } = require('electron');
+
+const on = (ch, cb) => { const h = (_e, ...a) => cb(...a); ipcRenderer.on(ch, h); return () => ipcRenderer.removeListener(ch, h); };
+
+contextBridge.exposeInMainWorld('api', {
+  loadState: () => ipcRenderer.invoke('state:load'),
+  saveState: (s) => ipcRenderer.invoke('state:save', s),
+  saveSnaps: (s) => ipcRenderer.invoke('snaps:save', s),
+  spawn: (o) => ipcRenderer.invoke('pty:spawn', o),
+  write: (id, d) => ipcRenderer.send('pty:write', id, d),
+  resize: (id, c, r) => ipcRenderer.send('pty:resize', id, c, r),
+  kill: (id) => ipcRenderer.send('pty:kill', id),
+  onData: (cb) => on('pty:data', cb),
+  onExit: (cb) => on('pty:exit', cb),
+  onFlush: (cb) => on('app:flush', cb),
+  flushed: () => ipcRenderer.send('app:flushed'),
+  pickDir: (start) => ipcRenderer.invoke('dialog:pickDir', start),
+  isDir: (p) => ipcRenderer.invoke('fs:isDir', p),
+  listSessions: () => ipcRenderer.invoke('sessions:list'),
+  readClip: () => ipcRenderer.invoke('clip:read'),
+  writeClip: (t) => ipcRenderer.send('clip:write', t),
+  openExternal: (u) => ipcRenderer.send('shell:open', u),
+  openPath: (p) => ipcRenderer.send('shell:reveal', p),
+  setLogin: (on_) => ipcRenderer.invoke('app:setLogin', on_),
+  getLogin: () => ipcRenderer.invoke('app:getLogin'),
+  overlay: (c, s) => ipcRenderer.send('win:overlay', c, s),
+  flash: () => ipcRenderer.send('win:focusFlash'),
+  tgStatus: () => ipcRenderer.invoke('tg:status'),
+  tgSetToken: (t) => ipcRenderer.invoke('tg:setToken', t),
+  tgEnable: (on_) => ipcRenderer.invoke('tg:enable', on_),
+  tgPair: () => ipcRenderer.invoke('tg:pair'),
+  tgUnpair: () => ipcRenderer.invoke('tg:unpair'),
+  tgSend: (html, home) => ipcRenderer.send('tg:send', html, !!home),
+  onTg: (cb) => on('tg:message', cb),
+  onTgStatus: (cb) => on('tg:status', cb),
+  pathForFile: (f) => { try { return webUtils.getPathForFile(f); } catch { return ''; } },
+});

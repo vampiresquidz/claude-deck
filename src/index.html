@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; media-src 'self'">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Claude Deck</title>
+<link rel="stylesheet" href="../node_modules/@xterm/xterm/css/xterm.css">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<div id="app">
+  <header id="topbar">
+    <button id="btnSidebar" class="icon-btn" title="Toggle sidebar (Ctrl+B)" data-icon="sidebar"></button>
+    <div id="crumb"></div>
+    <button id="searchPill" title="Search tabs and terminal output (Ctrl+K)">
+      <span data-icon="search"></span><span class="pill-text">Search sessions &amp; output</span><kbd>Ctrl K</kbd>
+    </button>
+    <div id="topSpacer"></div>
+  </header>
+
+  <aside id="sidebar">
+    <div class="sb-head">
+      <button id="btnNew" class="btn primary"><span data-icon="plus"></span>New session</button>
+      <button id="btnNewFolder" class="icon-btn" title="New folder (Ctrl+Shift+N)" data-icon="folderPlus"></button>
+    </div>
+    <div class="sb-search"><span data-icon="search"></span><input id="filter" placeholder="Filter sessions…" spellcheck="false"><button id="filterClear" class="icon-btn tiny hidden" data-icon="x"></button></div>
+    <div id="tree" tabindex="-1"></div>
+    <div class="sb-foot">
+      <button id="btnHistory" class="foot-btn" title="Browse past Claude sessions (Ctrl+H)"><span data-icon="history"></span>History</button>
+      <button id="btnResumeAll" class="foot-btn" title="Resume every session that was open"><span data-icon="play"></span>Resume all</button>
+      <button id="btnSettings" class="foot-btn" title="Settings (Ctrl+,)"><span data-icon="gear"></span></button>
+    </div>
+  </aside>
+  <div id="resizer"></div>
+
+  <main id="main">
+    <div id="strip"><div id="stripTabs"></div><button id="btnNew2" class="icon-btn" title="New session (Ctrl+T)" data-icon="plus"></button></div>
+    <div id="termHost">
+      <div id="empty">
+        <div class="empty-card">
+          <div class="logo-big" data-icon="logo"></div>
+          <h1>Claude Deck</h1>
+          <p>Run as many Claude Code sessions as you like, organized the way you think.<br>Every session survives a reboot — resume it in one click.</p>
+          <div class="empty-actions">
+            <button class="btn primary" id="emptyNew"><span data-icon="plus"></span>New session</button>
+            <button class="btn" id="emptyHist"><span data-icon="history"></span>Import past session</button>
+          </div>
+          <div class="keys"><span><kbd>Ctrl T</kbd> new</span><span><kbd>Ctrl K</kbd> search</span><span><kbd>Ctrl B</kbd> sidebar</span><span><kbd>Ctrl Tab</kbd> next</span></div>
+        </div>
+      </div>
+      <div id="findbar" class="hidden">
+        <input id="findInput" placeholder="Find in terminal" spellcheck="false">
+        <button id="findCase" class="icon-btn tiny" title="Match case">Aa</button>
+        <button id="findPrev" class="icon-btn tiny" data-icon="up" title="Previous (Shift+Enter)"></button>
+        <button id="findNext" class="icon-btn tiny" data-icon="down" title="Next (Enter)"></button>
+        <button id="findClose" class="icon-btn tiny" data-icon="x"></button>
+      </div>
+    </div>
+    <footer id="statusbar"></footer>
+  </main>
+</div>
+<div id="ctx" class="hidden"></div>
+<div id="toasts"></div>
+<div id="modalRoot"></div>
+
+<script src="../node_modules/@xterm/xterm/lib/xterm.js"></script>
+<script src="../node_modules/@xterm/addon-fit/lib/addon-fit.js"></script>
+<script src="../node_modules/@xterm/addon-webgl/lib/addon-webgl.js"></script>
+<script src="../node_modules/@xterm/addon-search/lib/addon-search.js"></script>
+<script src="../node_modules/@xterm/addon-web-links/lib/addon-web-links.js"></script>
+<script src="../node_modules/@xterm/addon-unicode11/lib/addon-unicode11.js"></script>
+<script src="icons.js"></script>
+<script src="themes.js"></script>
+<script src="bgfx.js"></script>
+<script src="renderer.js"></script>
+<script src="tg.js"></script>
+</body>
+</html>
