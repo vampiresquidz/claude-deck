@@ -56,7 +56,7 @@ function toast(msg, action, onAction, ms) {
 const DEFAULT_SETTINGS = {
   theme: 'midnight', accent: 'clay', fontFamily: 'Cascadia Code', fontSize: 14, lineHeight: 1.15,
   scrollback: 10000, cursorStyle: 'bar', cursorBlink: true, shell: 'auto', defaultCwd: '',
-  bgTheme: 'none', bgDim: 0.5, bgPause: true, claudeArgs: '', autoRestore: 'ask', notify: true, pingSound: true, tgNotifyAll: true, copyOnSelect: false, webgl: true, launchAtLogin: false,
+  bgTheme: 'none', bgDim: 0.5, bgPause: true, bgAuto: false, bgReact: false, closeToTray: false, lastUpdateCheck: 0, templates: [], claudeArgs: '', autoRestore: 'ask', notify: true, pingSound: true, tgNotifyAll: true, copyOnSelect: false, webgl: true, launchAtLogin: false,
 };
 let S = null;            // persisted state
 let HOME = '';
@@ -157,8 +157,9 @@ async function startPty(tab) {
   try { rt.fit.fit(); } catch { /* not laid out yet */ }
   const res = await window.api.spawn({
     id: tab.id, kind: tab.kind, cwd: tab.cwd, sessionId: tab.sessionId, args: tab.args, shell: S.settings.shell,
-    cols: rt.term.cols, rows: rt.term.rows,
+    cols: rt.term.cols, rows: rt.term.rows, prompt: tab.prompt,
   });
+  tab.prompt = null;
   if (!res.ok) {
     rt.term.write(`\x1b[31mFailed to start: ${res.error}\x1b[0m\r\n`);
     rt.exited = true; scheduleRender(); return;
@@ -181,14 +182,18 @@ function sleepTab(id, silent) {
     R.delete(id);
   }
   tab.open = false;
+  if (S.ui.split === id) S.ui.split = null;
   save();
   if (!silent) scheduleRender();
 }
 
 function showPane(id, noFocus) {
+  const sp = S.ui.split && S.ui.split !== id && R.get(S.ui.split) && R.get(S.ui.split).alive ? S.ui.split : null;
   for (const [rid, rt] of R) {
-    const on = rid === id;
+    const on = rid === id || rid === sp;
     rt.pane.classList.toggle('show', on);
+    rt.pane.classList.toggle('split-l', !!sp && rid === id);
+    rt.pane.classList.toggle('split-r', !!sp && rid === sp);
     if (on) {
       if (S.settings.webgl && !rt.webgl) {
         try {
@@ -197,7 +202,7 @@ function showPane(id, noFocus) {
           rt.term.loadAddon(w); rt.webgl = w;
         } catch { rt.webgl = null; }
       }
-      requestAnimationFrame(() => { try { rt.fit.fit(); } catch { /* ignore */ } if (!noFocus && !modalDepth) rt.term.focus(); });
+      requestAnimationFrame(() => { try { rt.fit.fit(); } catch { /* ignore */ } if (!noFocus && !modalDepth && rid === id) rt.term.focus(); });
     } else if (rt.webgl) { try { rt.webgl.dispose(); } catch { /* ignore */ } rt.webgl = null; }
   }
 }
@@ -328,7 +333,7 @@ function createTab(o) {
   const tab = {
     id: uid(), title: o.title || basename(o.cwd) || 'Session', cwd: o.cwd, kind: o.kind || 'claude', folderId: o.folderId || null,
     sessionId: o.sessionId || uid(), args: o.args != null ? o.args : S.settings.claudeArgs, color: null, pinned: false,
-    open: false, created: Date.now(), lastActive: Date.now(),
+    open: false, created: Date.now(), lastActive: Date.now(), prompt: o.prompt || null,
   };
   S.tabs.push(tab);
   if (tab.folderId) { const f = getFolder(tab.folderId); if (f) f.collapsed = false; }
@@ -343,6 +348,7 @@ function activate(id, opts) {
   S.activeId = id; tab.lastActive = Date.now();
   const rt = R.get(id);
   if (rt) rt.unread = false;
+  if (window.applyLook) window.applyLook(tab);
   const resume = !opts || opts.resume !== false;
   if (resume && (!rt || (!rt.alive && !rt.exited))) startPty(tab);
   else showPane(id);
@@ -456,14 +462,16 @@ function statusOf(tab) {
   if (!rt) return 'sleep';
   if (rt.exited) return 'exit';
   if (!rt.alive) return 'sleep';
+  if (rt.needs) return 'attn';
   if (rt.unread) return 'unread';
   if (rt.working) return 'work';
   return 'idle';
 }
-const STATUS_TEXT = { sleep: 'Asleep — click to resume', idle: 'Ready', work: 'Working…', unread: 'Finished — needs you', exit: 'Process exited' };
+const STATUS_TEXT = { sleep: 'Asleep — click to resume', idle: 'Ready', work: 'Working…', unread: 'Finished — needs you', attn: 'Waiting for your answer', exit: 'Process exited' };
 
 function renderAll() {
   renderTree(); renderStrip(); renderCrumb(); renderStatus(); renderMainState();
+  if (window.extrasRender) window.extrasRender();
   const hasRestorable = S.tabs.some((t) => !isAlive(t.id));
   $('#btnResumeAll').classList.toggle('hidden', !hasRestorable);
   document.title = (S.activeId && getTab(S.activeId) ? getTab(S.activeId).title + ' — ' : '') + 'Claude Deck';
@@ -494,7 +502,7 @@ function tabRow(tab, depth, q) {
     dotEl(st),
     h('div', { class: 'two' },
       h('div', { class: 'name' }, tab.kind === 'shell' && h('span', { class: 'ttype', html: icon('terminal', 12) + ' ' }), hl(tab.title, q)),
-      h('div', { class: 'sub' }, hl(sub, q))),
+      h('div', { class: 'sub' }, hl(sub, q)), window.ctxBar ? window.ctxBar(tab) : null),
     h('div', { class: 'actions' },
       st === 'sleep' || st === 'exit'
         ? h('button', { class: 'icon-btn', title: 'Resume', html: icon('play', 14), onclick: (e) => { e.stopPropagation(); activate(tab.id); } })
@@ -621,6 +629,7 @@ function renderStatus() {
     const st = statusOf(tab);
     sb.append(h('span', { class: 'chip' }, dotEl(st), STATUS_TEXT[st] === 'Asleep — click to resume' ? 'Asleep' : STATUS_TEXT[st]),
       h('span', { class: 'chip click', title: 'Open folder in Explorer', onclick: () => window.api.openPath(tab.cwd) }, h('span', { html: icon('folder', 13) }), shortPath(tab.cwd, HOME)));
+    if (tab.kind === 'claude' && window.ctxChip) { const c = window.ctxChip(tab); if (c) sb.append(c); }
     if (tab.kind === 'claude') sb.append(h('span', { class: 'chip click', title: 'Click to copy session id — resume manually with: claude --resume ' + tab.sessionId, onclick: () => { window.api.writeClip(tab.sessionId); toast('Session id copied'); } },
       h('span', { html: icon('copy', 13) }), tab.sessionId.slice(0, 8)));
   } else sb.append(h('span', null, 'Ready'));
@@ -672,6 +681,9 @@ function tabMenu(tab, x, y) {
     '-',
     { label: 'Duplicate (new conversation)', icon: 'copy', run: () => createTab({ title: tab.title + ' 2', cwd: tab.cwd, kind: tab.kind, folderId: tab.folderId, args: tab.args }) },
     ...(tab.kind === 'claude' ? [{ label: 'Copy session id', icon: 'link', run: () => { window.api.writeClip(tab.sessionId); toast('Session id copied'); } }] : []),
+    ...(tab.id !== S.activeId ? [{ label: 'Open beside current (split)', icon: 'sidebar', run: () => window.extras.splitWith(tab.id) }] : []),
+    ...(S.ui.split ? [{ label: 'Close split view', icon: 'x', run: () => window.extras.closeSplit() }] : []),
+    ...(tab.kind === 'claude' ? [{ label: 'Export transcript (.md)…', icon: 'copy', run: () => window.extras.exportTab(tab) }] : []),
     { label: 'Open folder in Explorer', icon: 'open', run: () => window.api.openPath(tab.cwd) },
     '-',
     { label: 'Remove session', icon: 'trash', danger: true, run: () => deleteTab(tab.id) },
@@ -687,6 +699,7 @@ function folderMenu(f, x, y) {
     { label: 'Move to folder…', icon: 'move', run: async () => { const p = await folderPicker('Move folder into', f.id); if (p !== undefined) moveFolder(f.id, p, null); } },
     '-',
     { swatches: true, current: f.color, pick: (c) => { f.color = c; save(); scheduleRender(); } },
+    { label: 'Wallpaper & accent…', icon: 'palette', run: () => window.extras.lookModal(f) },
     '-',
     { label: `Resume all (${tabs.filter((t) => !isAlive(t.id)).length})`, icon: 'play', run: () => resumeMany(tabs.filter((t) => !isAlive(t.id)).map((t) => t.id)) },
     { label: 'Put all to sleep', icon: 'moon', run: () => tabs.forEach((t) => sleepTab(t.id)) },
@@ -801,6 +814,10 @@ function newSessionModal(o) {
   const args = h('input', { class: 'inp', value: editing ? (editing.args || '') : S.settings.claudeArgs, placeholder: 'e.g. --model opus', spellcheck: 'false' });
   const folder = h('select', { class: 'inp' }, folderOptions(editing ? editing.folderId : o.folderId));
   const dirHint = h('div', { class: 'hint' });
+  const prompt = h('textarea', { class: 'inp', rows: 2, style: 'height:auto;padding:8px 11px;resize:none', placeholder: 'Sent to Claude when the session starts, e.g. "Read CLAUDE.md and summarise the open TODOs"', spellcheck: 'false' });
+  const promptField = h('div', { class: 'field' }, h('label', null, 'Opening prompt (optional)'), prompt);
+  const tpls = S.settings.templates || [];
+  const tplSel = h('select', { class: 'inp' }, [h('option', { value: '' }, tpls.length ? 'Start from a template…' : 'No templates yet — fill in the form and press “Save as template”'), ...tpls.map((t) => h('option', { value: t.id }, t.name))]);
   const argsField = h('div', { class: 'field' }, h('label', null, 'Extra Claude flags (optional)'), args);
   const seg = h('div', { class: 'seg' });
   const drawSeg = () => {
@@ -810,6 +827,11 @@ function newSessionModal(o) {
     argsField.classList.toggle('hidden', kind !== 'claude');
   };
   drawSeg();
+  tplSel.onchange = () => {
+    const t = tpls.find((x) => x.id === tplSel.value); if (!t) return;
+    kind = t.kind || 'claude'; drawSeg(); dir.value = t.cwd || dir.value; name.value = t.name; args.value = t.args || ''; prompt.value = t.prompt || '';
+    if (t.folderId && getFolder(t.folderId)) folder.value = t.folderId; check();
+  };
   const recents = [...new Set(S.tabs.slice().sort((a, b) => b.lastActive - a.lastActive).map((t) => t.cwd))].slice(0, 6);
   const chips = h('div', { class: 'chips' }, recents.map((p) => h('button', { class: 'chip-btn', title: p, onclick: () => { dir.value = p; dir.dispatchEvent(new Event('input')); } }, basename(p) || p)));
   const check = async () => { const ok = await window.api.isDir(dir.value.trim()); dirHint.textContent = ok ? '' : 'Folder not found'; dirHint.style.color = ok ? '' : 'var(--err)'; return ok; };
@@ -827,19 +849,25 @@ function newSessionModal(o) {
       close(); save(); scheduleRender(); return;
     }
     close();
-    createTab({ title: name.value.trim(), cwd, kind, folderId, args: args.value.trim() });
+    createTab({ title: name.value.trim(), cwd, kind, folderId, args: args.value.trim(), prompt: kind === 'claude' ? prompt.value.trim() : '' });
   };
 
   const body = h('div', null,
+    !editing && tpls.length ? h('div', { class: 'field' }, tplSel) : null,
     !editing && h('div', { class: 'field' }, seg),
     h('div', { class: 'field' }, h('label', null, 'Working directory'),
       h('div', { class: 'inline' }, dir, h('button', { class: 'btn', onclick: async () => { const p = await window.api.pickDir(dir.value); if (p) { dir.value = p; check(); } } }, 'Browse…')),
       dirHint, !editing && recents.length ? chips : null),
     h('div', { class: 'field' }, h('label', null, 'Name'), name),
     h('div', { class: 'field' }, h('label', null, 'Folder'), folder),
-    argsField,
+    argsField, editing ? null : promptField,
     editing && editing.kind === 'claude' ? h('div', { class: 'hint' }, 'Session id: ' + editing.sessionId) : null);
   const m = openModal({ title: editing ? 'Edit session' : 'New session', body, foot: [
+    ...(editing ? [] : [{ label: 'Save as template', run: () => {
+      const nm = name.value.trim() || basename(dir.value.trim()) || 'Template';
+      S.settings.templates = [...(S.settings.templates || []).filter((x) => x.name !== nm), { id: uid(), name: nm, kind, cwd: dir.value.trim(), args: args.value.trim(), prompt: prompt.value.trim(), folderId: folder.value || null }];
+      save(); toast('Template “' + nm + '” saved — pick it from the dropdown next time');
+    } }]),
     { label: 'Cancel', run: (c) => c() }, { label: editing ? 'Save' : 'Create session', primary: true, run: submit }] });
   body.addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.tagName !== 'BUTTON' && e.target.tagName !== 'SELECT') { e.preventDefault(); submit(m.close); } });
   setTimeout(() => (editing ? name : dir).focus(), 30);
@@ -908,6 +936,7 @@ function paletteModal() {
     { t: 'Reopen last removed session', i: 'history', k: 'Ctrl Shift T', run: reopenClosed },
     { t: 'Toggle sidebar', i: 'sidebar', k: 'Ctrl B', run: toggleSidebar },
     { t: 'Settings', i: 'gear', k: 'Ctrl ,', run: settingsModal },
+    ...(window.extraActions || []),
     ...Object.entries(THEMES).map(([k, v]) => ({ t: 'Theme: ' + v.name, i: 'palette', run: () => setSetting('theme', k) })),
   ];
 
@@ -980,6 +1009,7 @@ function setSetting(k, v) {
   S.settings[k] = v;
   if (k === 'theme' || k === 'accent') { applyChrome(); }
   if (k === 'bgTheme') { BGFX.set(v); applyChrome(); }
+  if (k === 'bgAuto' && window.applyLook) window.applyLook(getTab(S.activeId));
   if (k === 'bgDim') { BGFX.setDim(v); applyChrome(); }
   if (k === 'bgPause') { BGFX.pauseWhenBlurred = v; BGFX.refresh(); }
   if (['fontFamily', 'fontSize', 'lineHeight', 'scrollback', 'cursorStyle', 'cursorBlink'].includes(k)) applySettingsToTerms();
@@ -988,9 +1018,9 @@ function setSetting(k, v) {
 }
 
 function applyChrome() {
-  TH = applyTheme(S.settings.theme, S.settings.accent);
+  TH = applyTheme(S.settings.theme, (window.deckLook && window.deckLook.accent) || S.settings.accent);
   window.api.overlay(TH.bg, TH.symbol);
-  const fx = S.settings.bgTheme && S.settings.bgTheme !== 'none';
+  const fx = BGFX.current() && BGFX.current() !== 'none';
   if (fx) { const m = /^#(..)(..)(..)$/.exec(TH.term.background); if (m) TH.term = { ...TH.term, background: `rgba(${parseInt(m[1], 16)},${parseInt(m[2], 16)},${parseInt(m[3], 16)},${Math.max(0, S.settings.bgDim * 0.4)})` }; }
   for (const rt of R.values()) rt.term.options.theme = TH.term;
 }
@@ -1055,11 +1085,15 @@ function settingsModal() {
     h('div', { class: 'group-title' }, 'Startup & restore'),
     row('When Claude Deck opens', 'What happens to the sessions that were open before a reboot or quit', sel('autoRestore', [['ask', 'Ask me which to resume'], ['all', 'Resume all automatically'], ['none', 'Do nothing']])),
     row('Launch when I sign in to Windows', 'So your workspace is one click away after a restart', login),
+    row('Keep running in the tray when closed', 'Closing the window hides it instead of putting sessions to sleep (Quit from the tray icon)', h('div', { class: 'switch' + (s.closeToTray ? ' on' : ''), onclick: (e) => { setSetting('closeToTray', !s.closeToTray); e.currentTarget.classList.toggle('on', s.closeToTray); window.api.setTray(s.closeToTray); } })),
+    row('Updates', 'Checks GitHub releases once a day', h('button', { class: 'btn', onclick: () => window.extras.checkUpdate(true) }, 'Check now')),
     h('div', { class: 'group-title' }, 'Appearance'),
     row('Theme', null, sel('theme', Object.entries(THEMES).map(([k, v]) => [k, v.name]))),
     row('Accent color', null, swatches),
     h('div', { class: 'group-title' }, 'Animated wallpaper'),
     wallpaperPicker(),
+    row('Auto wallpaper by time of day', 'Clouds by day, sunset in the evening, moonlit at night (overrides the choice above)', toggle('bgAuto')),
+    row('Wallpaper brightens while Claude works', 'A gentle pulse so you can see activity at a glance', toggle('bgReact')),
     row('Readability scrim', 'How strongly panels cover the wallpaper', h('input', { type: 'range', min: 0.2, max: 0.95, step: 0.05, value: s.bgDim, oninput: (e) => setSetting('bgDim', parseFloat(e.target.value)) })),
     row('Pause when the window is in the background', 'Saves CPU/GPU', toggle('bgPause')),
     row('Font family', 'Any installed monospace font', text('fontFamily')),
@@ -1210,5 +1244,5 @@ async function boot() {
 const SMOKE_MODE = new URLSearchParams(location.search).has('smoke');
 function fitSeed() { /* placeholder for future per-window sizing */ }
 
-window.__deck = { get S() { return S; }, setSetting, createTab, R, activate, paletteModal, settingsModal, historyModal, newSessionModal, newFolder, restoreModal, getTab, sleepTab };
+window.__deck = { get S() { return S; }, setSetting, getFolder, createTab, R, activate, paletteModal, settingsModal, historyModal, newSessionModal, newFolder, restoreModal, getTab, sleepTab };
 boot();

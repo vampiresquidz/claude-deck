@@ -270,6 +270,11 @@ const TG = (() => {
   }, 1500);
 
   // Light, one-line ping (the full result is /peek N). Sessions you messaged get their own reply instead.
+  window.tgOnNeeds = (id) => {
+    const tab = getTab(id); if (!tab || !S.settings.tgNotifyAll) return;
+    const i = snap.indexOf(id);
+    T.out(`⚠️ <b>${esc(tab.title.slice(0, 44))}</b> is waiting for your answer${i >= 0 ? ` · /peek ${i + 1} · /key ${i + 1} 1 enter` : ' · /list'}`, true);
+  };
   window.tgOnFinish = (id) => {
     const tab = getTab(id), rt = R.get(id);
     if (!tab || !rt || waiting.has(id) || !S.settings.tgNotifyAll) return;

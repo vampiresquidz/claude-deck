@@ -20,6 +20,28 @@ module.exports = (getWin, ptys) => {
     const ev = (code) => win.webContents.executeJavaScript(code);
     try {
       log('boot ok, tabs=', await ev('__deck.S.tabs.length'));
+      if (process.env.CT_SMOKE_PHASE === 'extras') {
+        const home = JSON.stringify(os.homedir());
+        const info = await ev(`(() => { const d = __deck; const f = d.newFolder(null, 'Poker'); const a = d.createTab({ title: 'Solver', cwd: ${home}, kind: 'shell', folderId: f.id }); const b = d.createTab({ title: 'Tracker', cwd: ${home}, kind: 'shell', folderId: f.id }); f.look = { bg: 'aurora', accent: 'teal' }; d.activate(a.id); return JSON.stringify({ a: a.id, b: b.id, f: f.id }); })()`);
+        const { a, b } = JSON.parse(info); await sleep(2500);
+        log('look applied: bg=' + await ev('BGFX.current()') + ' accent=' + await ev('deckLook.accent'));
+        await sleep(3000);
+        await ev(`(() => { const d = __deck; d.getTab('${a}').kind = 'claude'; d.R.get('${a}').term.write(['', ' Do you want to proceed?', ' ❯ 1. Yes', '   2. No', ''].join(String.fromCharCode(13, 10))); 0 })()`); await sleep(5200);
+        log('dbg: ' + await ev(`(() => { const rt = __deck.R.get('${a}'); return JSON.stringify({ alive: rt.alive, working: rt.working, idle: Date.now() - rt.lastData, tail: termText(rt, 6) }); })()`));
+        log('attn flag: ' + await ev(`__deck.R.get('${a}').needs`) + ' badge: ' + await ev(`(document.querySelector('#inbox') || {}).textContent`));
+        await ev(`extras.splitWith('${b}')`); await sleep(800);
+        log('split classes: ' + await ev(`[...document.querySelectorAll('.term-pane')].map(p => p.className).join(' | ')`));
+        const sess = await ev('window.api.listSessions()'); const cx = await ev(`window.api.ctxUsage(${JSON.stringify(sess.slice(0, 3).map((x) => x.id))})`);
+        log('ctx usage sample: ' + JSON.stringify(cx));
+        let im = await win.webContents.capturePage(); fs.writeFileSync(path.join(out, 'ex-split.png'), im.toPNG());
+        await ev('extras.broadcastModal()'); await sleep(400);
+        im = await win.webContents.capturePage(); fs.writeFileSync(path.join(out, 'ex-broadcast.png'), im.toPNG());
+        await ev(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`); await sleep(200);
+        await ev('__deck.newSessionModal()'); await sleep(400);
+        im = await win.webContents.capturePage(); fs.writeFileSync(path.join(out, 'ex-new.png'), im.toPNG());
+        log('update check: ' + JSON.stringify(await ev('window.api.checkUpdate()')));
+        setTimeout(() => process.exit(0), 200); return;
+      }
       if (process.env.CT_SMOKE_PHASE === 'wp') {
         const wp = require('fs').readdirSync(process.env.WPDIR).find((f) => f.endsWith('.mp4')).replace('.mp4', '');
         const base = require('url').pathToFileURL(process.env.WPDIR).href;

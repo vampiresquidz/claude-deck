@@ -39,6 +39,24 @@ Settings → *Animated wallpaper*. Seven wallpapers are drawn live in code on a 
 - **Make your own:** the dashed **+ Generate** tile in the picker takes a prompt. Claude Deck runs `claude -p` in the background, which uses your Claude login and the Higgsfield connector to make a 5 second pixel-art clip (about 7.5 credits), then loops it with ffmpeg (optional, found on PATH or at `C:\ffmpeg\bin`) and adds it to the picker. Hover a custom tile to delete it.
 - Panels turn translucent over a wallpaper. The **Readability scrim** slider sets how strongly they cover it, and animation pauses while the window is in the background.
 
+## More features
+
+![Split view with a per-folder wallpaper and accent](docs/split-folder-look.png)
+
+- **Context meter.** Every Claude tab shows tokens used and the % of its context window (sidebar bar + status bar chip, amber at 70%, red at 90%), read from the session transcript.
+- **Needs-you inbox.** Sessions waiting on a permission prompt or question get a red dot, a "N need you" badge in the sidebar, a desktop toast and a Telegram ping.
+- **Session templates.** In *New session* fill in folder, flags and an opening prompt, press **Save as template**, and pick it from the dropdown next time.
+
+![New session dialog with templates and opening prompt](docs/new-session.png)
+
+- **Broadcast** (Ctrl Shift B): send one message to any set of live sessions.
+- **Split view:** right-click a session, *Open beside current*.
+- **Per-folder look:** right-click a folder, *Wallpaper & accent*. Subfolders inherit it.
+- **Export transcript** to Markdown from a session's menu.
+- **Tray mode** (Settings): closing the window hides it and keeps every session running.
+- **Update check:** once a day against GitHub releases (Settings → Updates to check now).
+- **Wallpaper extras:** auto-switch by time of day, and a gentle brightness pulse while Claude is working.
+
 ## Run
 ```
 git clone https://github.com/vampiresquidz/claude-deck && cd claude-deck
@@ -96,7 +114,10 @@ Smoke test (dev): `set CT_SMOKE=1&& npx electron .` writes screenshots to `%TEMP
 
 
 ## Build an installer
-`npm run dist` (electron-builder, NSIS) writes `dist\Claude Deck Setup <version>.exe`.
+The installer is unsigned, so Windows SmartScreen may warn on first run (More info, then Run anyway). `npm run dist` (electron-builder, NSIS) writes `dist\Claude Deck Setup <version>.exe`.
+
+## Tests
+`npm test` boots the real app headlessly and checks folder looks, the attention inbox, split view and that no renderer errors occur.
 
 ## License
 MIT

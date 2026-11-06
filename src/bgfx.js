@@ -158,6 +158,6 @@
     canvas.width = W; canvas.height = H; const c = canvas.getContext('2d'); th.draw(c, 6, th.init()); return true;
   }
 
-  const BGFX = { list, register, unregister, set, setDim, preview, pauseWhenBlurred: true, refresh() { const p = document.hidden || (this.pauseWhenBlurred && !document.hasFocus()); paused = p; syncRun(); } };
+  const BGFX = { current: () => (cur ? cur.key : 'none'), list, register, unregister, set, setDim, preview, pauseWhenBlurred: true, refresh() { const p = document.hidden || (this.pauseWhenBlurred && !document.hasFocus()); paused = p; syncRun(); } };
   window.BGFX = BGFX;
 })();

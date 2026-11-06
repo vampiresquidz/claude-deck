@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Menu, nativeImage, safeStorage } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Menu, nativeImage, safeStorage, Tray } = require('electron');
 const { Telegram } = require('./telegram');
 const { Wallpapers } = require('./wallpapers');
 const path = require('path');
@@ -142,7 +142,8 @@ function spawnPty(o) {
     const resume = !!findSessionFile(o.sessionId);
     mode = resume ? 'resume' : 'new';
     const flag = resume ? `--resume ${o.sessionId}` : `--session-id ${o.sessionId}`;
-    args.push('-NoExit', '-Command', `claude ${flag}${extra ? ' ' + extra : ''}`);
+    const pr = !resume && o.prompt ? " '" + String(o.prompt).replace(/'/g, "''").replace(/[\r\n]+/g, ' ') + "'" : '';
+    args.push('-NoExit', '-Command', `claude ${flag}${extra ? ' ' + extra : ''}${pr}`);
   }
   let p;
   try {
@@ -212,6 +213,83 @@ ipcMain.on('win:overlay', (_e, color, symbolColor) => {
 let tg = null;
 const toRenderer = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload); };
 ipcMain.handle('tg:status', () => tg.status());
+
+/* ---- context usage + transcript export ---- */
+const sessionLines = (f, tailBytes) => {
+  const st = fs.statSync(f); const len = Math.min(tailBytes, st.size);
+  const fd = fs.openSync(f, 'r'); const b = Buffer.alloc(len); fs.readSync(fd, b, 0, len, st.size - len); fs.closeSync(fd);
+  return b.toString('utf8').split('\n');
+};
+ipcMain.handle('ctx:usage', (_e, ids) => {
+  const out = {};
+  for (const id of ids || []) {
+    try {
+      const f = findSessionFile(id); if (!f) continue;
+      const lines = sessionLines(f, 400 * 1024);
+      for (let i = lines.length - 1; i >= 0; i--) {
+        if (!lines[i].includes('"usage"')) continue;
+        let j; try { j = JSON.parse(lines[i]); } catch { continue; }
+        const u = j.message && j.message.usage; if (!u || j.isSidechain) continue;
+        const tokens = (u.input_tokens || 0) + (u.cache_creation_input_tokens || 0) + (u.cache_read_input_tokens || 0);
+        if (!tokens) continue;
+        const model = (j.message && j.message.model) || '';
+        out[id] = { tokens, model, limit: /1m/i.test(model) || tokens > 200000 ? 1000000 : 200000 };
+        break;
+      }
+    } catch { /* skip */ }
+  }
+  return out;
+});
+ipcMain.handle('session:export', async (_e, id, title) => {
+  const f = findSessionFile(id);
+  if (!f) return { ok: false, error: 'No saved conversation for this session yet.' };
+  const md = ['# ' + (title || 'Claude session'), '', '_Exported from Claude Deck · session ' + id + '_', ''];
+  for (const line of fs.readFileSync(f, 'utf8').split('\n')) {
+    if (!line.trim()) continue;
+    let j; try { j = JSON.parse(line); } catch { continue; }
+    if ((j.type !== 'user' && j.type !== 'assistant') || j.isSidechain || !j.message) continue;
+    const c = j.message.content; const parts = [];
+    if (typeof c === 'string') parts.push(c);
+    else if (Array.isArray(c)) for (const p of c) {
+      if (p.type === 'text' && p.text) parts.push(p.text);
+      else if (p.type === 'tool_use') parts.push('`[tool: ' + p.name + ']`');
+    }
+    const txt = parts.join('\n\n').trim();
+    if (!txt || /^<(command-|local-command|system-reminder)/.test(txt)) continue;
+    md.push('## ' + (j.type === 'user' ? 'You' : 'Claude'), '', txt, '');
+  }
+  const r = await dialog.showSaveDialog(win, { defaultPath: (title || 'session').replace(/[\/:*?"<>|]+/g, '_') + '.md', filters: [{ name: 'Markdown', extensions: ['md'] }] });
+  if (r.canceled || !r.filePath) return { ok: false, canceled: true };
+  fs.writeFileSync(r.filePath, md.join('\n'));
+  return { ok: true, path: r.filePath };
+});
+
+/* ---- updates (GitHub releases) + tray ---- */
+const REPO = 'vampiresquidz/claude-deck';
+const verCmp = (a, b) => { const x = a.split('.').map(Number), y = b.split('.').map(Number); for (let i = 0; i < 3; i++) { if ((x[i] || 0) !== (y[i] || 0)) return (x[i] || 0) - (y[i] || 0); } return 0; };
+ipcMain.handle('app:checkUpdate', async () => {
+  try {
+    const r = await fetch(`https://api.github.com/repos/${REPO}/releases/latest`, { headers: { 'User-Agent': 'claude-deck' } });
+    if (!r.ok) return { ok: false, error: r.status === 404 ? 'No releases published yet.' : 'HTTP ' + r.status };
+    const j = await r.json(); const latest = String(j.tag_name || '').replace(/^v/, '');
+    const asset = (j.assets || []).find((a) => /\.exe$/i.test(a.name));
+    return { ok: true, current: app.getVersion(), latest, newer: verCmp(latest, app.getVersion()) > 0, url: asset ? asset.browser_download_url : j.html_url, page: j.html_url };
+  } catch (e) { return { ok: false, error: e.message }; }
+});
+let tray = null, trayOn = false, reallyQuit = false;
+ipcMain.handle('app:setTray', (_e, on) => {
+  trayOn = !!on;
+  if (trayOn && !tray) {
+    try {
+      tray = new Tray(nativeImage.createFromPath(path.join(__dirname, 'build', 'icon.png')).resize({ width: 16, height: 16 }));
+      tray.setToolTip('Claude Deck');
+      const show = () => { if (win && !win.isDestroyed()) { win.show(); win.focus(); } };
+      tray.on('click', show);
+      tray.setContextMenu(Menu.buildFromTemplate([{ label: 'Show Claude Deck', click: show }, { type: 'separator' }, { label: 'Quit (sessions go to sleep)', click: () => { reallyQuit = true; if (win && !win.isDestroyed()) win.close(); else app.quit(); } }]));
+    } catch { tray = null; }
+  } else if (!trayOn && tray) { tray.destroy(); tray = null; }
+  return trayOn;
+});
 let wps = null;
 ipcMain.handle('wp:list', () => wps.list());
 ipcMain.handle('wp:generate', (_e, prompt) => wps.generate(prompt));
@@ -272,6 +350,7 @@ function createWindow() {
 
   win.on('close', (e) => {
     saveBounds();
+    if (trayOn && !reallyQuit && !SMOKE) { e.preventDefault(); win.hide(); return; }
     if (flushed || SMOKE) { quitting = true; return; }
     e.preventDefault();
     quitting = true; // stop exit events from clearing "open" flags
