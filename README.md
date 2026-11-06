@@ -40,6 +40,7 @@ Settings → *Animated wallpaper*. Seven wallpapers are drawn live in code on a 
 
 ## Run
 ```
+git clone https://github.com/vampiresquidz/claude-deck && cd claude-deck
 npm install          # once
 npm start            # or double-click the "Claude Deck" shortcut (powershell -File install-shortcut.ps1)
 ```
