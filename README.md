@@ -36,6 +36,7 @@ Settings → *Animated wallpaper*. Seven wallpapers are drawn live in code on a 
 
 - *Code themes* live in [`src/bgfx.js`](src/bgfx.js). Each one is a small `init()` plus `draw(ctx, t, state)` function, with a faint grid overlay for the LED look. Adding a theme means adding one object.
 - *AI themes* were generated with Kling 3.0 Turbo from a text prompt (about 7 credits each), then made seamless with ffmpeg by playing the clip forward and then reversed. They are plain mp4 files in [`src/themes-ai/`](src/themes-ai), so you can drop in your own and register it in the `AI` table.
+- **Make your own:** the dashed **+ Generate** tile in the picker takes a prompt. Claude Deck runs `claude -p` in the background, which uses your Claude login and the Higgsfield connector to make a 5 second pixel-art clip (about 7.5 credits), then loops it with ffmpeg (optional, found on PATH or at `C:\ffmpeg\bin`) and adds it to the picker. Hover a custom tile to delete it.
 - Panels turn translucent over a wallpaper. The **Readability scrim** slider sets how strongly they cover it, and animation pauses while the window is in the background.
 
 ## Run

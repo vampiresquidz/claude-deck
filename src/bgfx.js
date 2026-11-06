@@ -149,11 +149,15 @@
   }
   function setDim(v) { dim = v; document.documentElement.style.setProperty('--fx-dim', String(v)); }
 
+  function register(items) {
+    for (const it of items) { if (AI[it.key]) continue; AI[it.key] = { name: it.name, file: it.file, poster: it.poster }; list.push(it); }
+  }
+  function unregister(key) { delete AI[key]; const i = list.findIndex((x) => x.key === key); if (i >= 0) list.splice(i, 1); }
   function preview(key, canvas) {
     const th = CODE[key]; if (!th) return false;
     canvas.width = W; canvas.height = H; const c = canvas.getContext('2d'); th.draw(c, 6, th.init()); return true;
   }
 
-  const BGFX = { list, set, setDim, preview, pauseWhenBlurred: true, refresh() { const p = document.hidden || (this.pauseWhenBlurred && !document.hasFocus()); paused = p; syncRun(); } };
+  const BGFX = { list, register, unregister, set, setDim, preview, pauseWhenBlurred: true, refresh() { const p = document.hidden || (this.pauseWhenBlurred && !document.hasFocus()); paused = p; syncRun(); } };
   window.BGFX = BGFX;
 })();

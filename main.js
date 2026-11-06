@@ -1,6 +1,7 @@
 'use strict';
 const { app, BrowserWindow, ipcMain, dialog, shell, clipboard, Menu, nativeImage, safeStorage } = require('electron');
 const { Telegram } = require('./telegram');
+const { Wallpapers } = require('./wallpapers');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -211,6 +212,11 @@ ipcMain.on('win:overlay', (_e, color, symbolColor) => {
 let tg = null;
 const toRenderer = (ch, payload) => { if (win && !win.isDestroyed()) win.webContents.send(ch, payload); };
 ipcMain.handle('tg:status', () => tg.status());
+let wps = null;
+ipcMain.handle('wp:list', () => wps.list());
+ipcMain.handle('wp:generate', (_e, prompt) => wps.generate(prompt));
+ipcMain.handle('wp:cancel', () => wps.cancel());
+ipcMain.handle('wp:delete', (_e, id) => wps.remove(id));
 ipcMain.handle('tg:setToken', async (_e, t) => { try { return { ok: true, status: await tg.setToken(t) }; } catch (e) { return { ok: false, error: e.message }; } });
 ipcMain.handle('tg:enable', (_e, on) => { tg.setEnabled(on); return tg.status(); });
 ipcMain.handle('tg:pair', () => tg.newPair());
@@ -245,7 +251,7 @@ function createWindow() {
   win.once('ready-to-show', showOnce);
   win.webContents.once('did-finish-load', showOnce);
   setTimeout(showOnce, 4000);
-  win.loadFile(path.join(__dirname, 'src', 'index.html'), SMOKE ? { query: { smoke: '1' } } : undefined);
+  win.loadFile(path.join(__dirname, 'src', 'index.html'), SMOKE ? { query: { smoke: '1' } } : (process.env.CT_RESTORE ? { query: { restore: process.env.CT_RESTORE } } : undefined));
 
   win.webContents.setWindowOpenHandler(({ url }) => { if (/^https?:\/\//i.test(url)) shell.openExternal(url); return { action: 'deny' }; });
   win.webContents.on('will-navigate', (e) => e.preventDefault());
@@ -278,6 +284,7 @@ function createWindow() {
 app.whenReady().then(() => {
   Menu.setApplicationMenu(null);
   tg = new Telegram(DATA, safeStorage, (ev, p) => toRenderer(ev === 'message' ? 'tg:message' : 'tg:status', p));
+  wps = new Wallpapers(DATA, (ev, p) => toRenderer(ev, p));
   createWindow();
   if (!SMOKE) win.webContents.once('did-finish-load', () => setTimeout(() => tg.start(), 1500));
   if (SMOKE) require('./smoke')(() => win, ptys);

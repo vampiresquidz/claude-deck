@@ -20,6 +20,19 @@ module.exports = (getWin, ptys) => {
     const ev = (code) => win.webContents.executeJavaScript(code);
     try {
       log('boot ok, tabs=', await ev('__deck.S.tabs.length'));
+      if (process.env.CT_SMOKE_PHASE === 'wp') {
+        const wp = require('fs').readdirSync(process.env.WPDIR).find((f) => f.endsWith('.mp4')).replace('.mp4', '');
+        const base = require('url').pathToFileURL(process.env.WPDIR).href;
+        await ev(`BGFX.register([{ key: 'custom-${wp}', id: '${wp}', name: 'koi pond test', kind: 'ai', custom: true, file: '${base}/${wp}.mp4', poster: '${base}/${wp}.jpg' }]); __deck.setSetting('bgTheme', 'custom-${wp}'); 0`);
+        await sleep(2500);
+        let im = await win.webContents.capturePage(); fs.writeFileSync(path.join(out, 'wp-main.png'), im.toPNG());
+        await ev('__deck.settingsModal()'); await sleep(400);
+        await ev(`document.querySelector('.modal .m-body').scrollTop = 420`); await sleep(300);
+        im = await win.webContents.capturePage(); fs.writeFileSync(path.join(out, 'wp-settings.png'), im.toPNG());
+        await ev(`document.querySelector('.wp-add').click()`); await sleep(500);
+        im = await win.webContents.capturePage(); fs.writeFileSync(path.join(out, 'wp-modal.png'), im.toPNG());
+        setTimeout(() => process.exit(0), 200); return;
+      }
       if (process.env.CT_SMOKE_PHASE === 'fx') {
         await ev(`__deck.createTab({ title: 'Demo', cwd: ${JSON.stringify(os.homedir())}, kind: 'shell' })`); await sleep(1500);
         await ev(`(() => { const d = __deck; const f = d.newFolder(null, 'Work'); const f2 = d.newFolder(f.id, 'Client A'); const g = d.newFolder(null, 'Side projects');

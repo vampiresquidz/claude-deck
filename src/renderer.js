@@ -998,14 +998,47 @@ function applyChrome() {
 function wallpaperPicker() {
   const s = S.settings;
   const grid = h('div', { class: 'wp-grid' });
-  for (const it of BGFX.list) {
-    const card = h('div', { class: 'wp-card' + ((s.bgTheme || 'none') === it.key ? ' on' : ''), title: it.name, onclick: () => { setSetting('bgTheme', it.key); grid.querySelectorAll('.wp-card').forEach((n) => n.classList.remove('on')); card.classList.add('on'); } });
-    if (it.kind === 'none') card.append(h('div', { class: 'none' }, 'Off'));
-    else if (it.kind === 'ai') card.append(h('img', { src: it.poster }));
-    else { const cv = document.createElement('canvas'); BGFX.preview(it.key, cv); card.append(cv); }
-    card.append(h('span', null, it.name)); grid.append(card);
-  }
+  const pick = (key) => { setSetting('bgTheme', key); grid.querySelectorAll('.wp-card').forEach((n) => n.classList.toggle('on', n.dataset.key === key)); };
+  const draw = () => {
+    grid.textContent = '';
+    for (const it of BGFX.list) {
+      const card = h('div', { class: 'wp-card' + ((S.settings.bgTheme || 'none') === it.key ? ' on' : ''), title: it.prompt || it.name, 'data-key': it.key, onclick: () => pick(it.key) });
+      if (it.kind === 'none') card.append(h('div', { class: 'none' }, 'Off'));
+      else if (it.kind === 'ai') card.append(it.poster ? h('img', { src: it.poster }) : h('video', { src: it.file, muted: '', preload: 'metadata' }));
+      else { const cv = document.createElement('canvas'); BGFX.preview(it.key, cv); card.append(cv); }
+      card.append(h('span', null, it.name));
+      if (it.custom) card.append(h('button', { class: 'wp-x', title: 'Delete', html: icon('x', 12), onclick: async (e) => {
+        e.stopPropagation(); await window.api.wpDelete(it.id);
+        if (S.settings.bgTheme === it.key) setSetting('bgTheme', 'none');
+        BGFX.unregister(it.key); draw();
+      } }));
+      grid.append(card);
+    }
+    grid.append(h('div', { class: 'wp-card wp-add', title: 'Generate a new animated wallpaper from a prompt', onclick: () => generateWallpaperModal((item) => { BGFX.register([item]); draw(); pick(item.key); }) },
+      h('div', { class: 'none', style: 'flex-direction:column;gap:2px' }, h('b', { style: 'font-size:26px;font-weight:300;line-height:1' }, '+'), h('small', null, 'Generate'))));
+  };
+  draw();
   return grid;
+}
+
+function generateWallpaperModal(onDone) {
+  const inp = h('textarea', { class: 'inp', rows: 3, style: 'height:auto;padding:9px 11px;resize:none', placeholder: 'e.g. a koi pond at dusk with lily pads and drifting petals', maxlength: 280, spellcheck: 'false' });
+  const status = h('div', { style: 'color:var(--dim);min-height:18px;margin-top:10px' });
+  let busy = false, off = null;
+  const body = h('div', null,
+    h('div', { style: 'color:var(--dim);margin-bottom:8px;line-height:1.5' }, 'Describe the scene. Claude generates a short pixel-art clip (Kling 3.0 Turbo via your Higgsfield connector, about 7.5 credits) and loops it. Takes 1-3 minutes, and you can keep working.'),
+    inp, status);
+  openModal({ title: 'New animated wallpaper', body, foot: [
+    { label: 'Cancel', run: (c) => { if (busy) window.api.wpCancel(); c(); } },
+    { label: 'Generate', primary: true, run: async (c) => {
+      if (busy) return; const prompt = inp.value.trim(); if (!prompt) { status.textContent = 'Describe the wallpaper first.'; return; }
+      busy = true; inp.disabled = true; status.textContent = 'Starting…';
+      off = window.api.onWp((p) => { status.textContent = p.msg; });
+      c(); toast('Generating wallpaper… (1-3 min)');
+      const r = await window.api.wpGenerate(prompt); if (off) off();
+      if (r.ok) { toast('Wallpaper ready: ' + r.item.name); onDone(r.item); } else toast('Wallpaper failed: ' + String(r.error).slice(0, 160), null, null, 9000);
+    } }] });
+  setTimeout(() => inp.focus(), 50);
 }
 
 function settingsModal() {
@@ -1108,6 +1141,7 @@ async function boot() {
   const base = defaultState();
   S = loaded.state ? { ...base, ...loaded.state, settings: { ...base.settings, ...(loaded.state.settings || {}) }, ui: { ...base.ui, ...(loaded.state.ui || {}) } } : base;
   S.tabs.forEach((t) => { t.sessionId = t.sessionId || uid(); });
+  try { BGFX.register(await window.api.wpList()); } catch { /* none */ }
   BGFX.pauseWhenBlurred = S.settings.bgPause !== false; BGFX.setDim(S.settings.bgDim); BGFX.set(S.settings.bgTheme, { instant: true });
   applyChrome();
   hydrateIcons();
@@ -1162,7 +1196,7 @@ async function boot() {
 
   // restore flow
   const wasOpen = S.tabs.filter((t) => t.open);
-  const mode = S.settings.autoRestore;
+  const mode = new URLSearchParams(location.search).get('restore') || S.settings.autoRestore;
   if (wasOpen.length && !SMOKE_MODE) {
     if (mode === 'all') {
       const first = getTab(S.activeId) && wasOpen.includes(getTab(S.activeId)) ? S.activeId : wasOpen[0].id;
